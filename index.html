@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI 聊天助手</title>
+
+  <!-- Markdown 语法高亮样式 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+  <!-- Markdown 解析库 -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #f5f6fa;
+      color: #2c3e50;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      background: #3498db;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+    .chat-container {
+      flex: 1;
+      padding: 1rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .message {
+      max-width: 80%;
+      padding: 0.8rem;
+      border-radius: 12px;
+      line-height: 1.5;
+      overflow-wrap: break-word;
+    }
+    .user {
+      align-self: flex-end;
+      background: #3498db;
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .ai {
+      align-self: flex-start;
+      background: #ecf0f1;
+      color: #2c3e50;
+      border-bottom-left-radius: 4px;
+    }
+    /* 代码块高亮 */
+    .message pre {
+      margin: 0.5rem 0;
+      padding: 1rem;
+      background: #2d3748;
+      border-radius: 8px;
+      overflow: auto;
+    }
+    .message code {
+      font-family: 'Courier New', monospace;
+    }
+    .message blockquote {
+      border-left: 4px solid #3498db;
+      margin: 0.5rem 0;
+      padding-left: 1rem;
+      color: #555;
+    }
+    .message a {
+      color: #3498db;
+      text-decoration: underline;
+    }
+    .loading {
+      align-self: center;
+      color: #7f8c8d;
+      font-style: italic;
+    }
+    footer {
+      padding: 1rem;
+      background: white;
+      border-top: 1px solid #ddd;
+    }
+    #input-container {
+      display: flex;
+      gap: 0.5rem;
+    }
+    #message-input {
+      flex: 1;
+      padding: 0.8rem;
+      border: 1px solid #bdc3c7;
+      border-radius: 8px;
+      font-size: 1rem;
+      resize: none;
+      overflow: hidden;
+      min-height: 44px;
+      max-height: 120px;
+    }
+    #message-input:focus {
+      outline: none;
+      border-color: #3498db;
+    }
+    button {
+      padding: 0.8rem 1.2rem;
+      background: #3498db;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+    button:hover {
+      background: #2980b9;
+    }
+  </style>
+</head>
+<body>
+
+  <header>AI 聊天助手</header>
+
+  <div class="chat-container" id="chat-container">
+    <div class="message ai">
+      你好！我是你的 AI 助手，请问有什么可以帮你的？<br><br>
+      <strong>功能支持：</strong>
+      <ul>
+        <li>✅ <strong>Markdown</strong> 渲染</li>
+        <li>✅ <code>代码块</code> 高亮</li>
+        <li>✅ 输入框自动换行</li>
+        <li>⌨️ <strong>Enter</strong> 发送，<strong>Shift+Enter</strong> 换行</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    <div id="input-container">
+      <textarea
+        id="message-input"
+        placeholder="输入消息（Shift+Enter 换行，Enter 发送）"
+        autofocus
+        rows="1"
+      ></textarea>
+      <button onclick="sendMessage()">发送</button>
+    </div>
+  </footer>
+
+  <script>
+    // 初始化代码高亮
+    marked.setOptions({
+      highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          return hljs.highlight(code, { language: lang }).value;
+        }
+        return hljs.highlightAuto(code).value;
+      },
+      langPrefix: 'hljs language-',
+      breaks: true,  // 支持 \n 换行
+      gfm: true      // 支持 GitHub Flavored Markdown
+    });
+
+    const chatContainer = document.getElementById("chat-container");
+    const messageInput = document.getElementById("message-input");
+
+    // 对话历史
+    let history = [];
+
+    async function sendMessage() {
+      const message = messageInput.value.trim();
+      if (!message) return;
+
+      // 清空输入框
+      messageInput.value = "";
+      autoResize();
+
+      // 添加用户消息到界面和历史
+      addMessageToUI(message, "user");
+      history.push({ role: "user", content: message });
+
+      // 显示加载中
+      const loading = document.createElement("div");
+      loading.className = "message loading";
+      loading.textContent = "AI 正在思考...";
+      chatContainer.appendChild(loading);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+
+      try {
+        const response = await fetch("http://localhost:8000/api/v1/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ message, history }),
+        });
+
+        const data = await response.json();
+
+        // 移除加载提示
+        chatContainer.removeChild(loading);
+
+        // 显示 AI 回复（支持 Markdown）
+        addMessageToUI(data.response, "ai");
+        history.push({ role: "assistant", content: data.response });
+      } catch (error) {
+        chatContainer.removeChild(loading);
+        addMessageToUI("❌ 连接失败，请检查后端服务是否运行：http://localhost:8000", "ai");
+        console.error("请求失败:", error);
+      }
+    }
+
+    function addMessageToUI(content, role) {
+      const messageDiv = document.createElement("div");
+      messageDiv.className = `message ${role}`;
+      messageDiv.innerHTML = marked.parse(content || "");
+      chatContainer.appendChild(messageDiv);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    // 自动调整输入框高度
+    function autoResize() {
+      messageInput.style.height = "auto";
+      messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + "px";
+    }
+    messageInput.addEventListener("input", autoResize);
+
+    // 回车发送，Shift+Enter 换行
+    messageInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        if (e.shiftKey) {
+          // Shift+Enter：换行，延迟调整高度
+          setTimeout(autoResize, 0);
+        } else {
+          // Enter：发送
+          e.preventDefault();
+          sendMessage();
+        }
+      }
+    });
+  </script>
+
+</body>
+</html> 
