@@ -1,5 +1,3 @@
-version: '3.8'
-
 name: knowledgeforZJl
 
 services:
@@ -27,3 +25,4 @@ services:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
     restart: unless-stopped
+ 

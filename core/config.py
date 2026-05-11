@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     app_name: str = "Model Server"
     debug: bool = False
 
+    #embedding模型配置
+    embedding_model: str
+    embedding_api_key: str
+    embedding_base_url: str
+    
     # ✅ 正确配置 .env 路径
     model_config = ConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
@@ -32,4 +37,13 @@ class Settings(BaseSettings):
 
 
 # 创建全局 settings 实例
-settings = Settings()
+try:
+    settings = Settings()
+    print("✅ 全局配置加载成功！")
+except Exception as e:
+    print("❌ 配置加载失败！可能是以下原因：")
+    print("   1. .env 文件不存在或路径错误")
+    print("   2. .env 中缺少必要的字段（如 embedding_model、api_key 等）")
+    print("   3. 字段值为空或格式错误（如 qdrant_port 写成了字符串）")
+    print("\n🎯 详细错误信息：")
+    raise e  # 重新抛出异常，便于定位
