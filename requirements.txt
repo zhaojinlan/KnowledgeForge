@@ -1,0 +1,36 @@
+# Core
+fastapi==0.136.1
+uvicorn==0.46.0
+python-multipart==0.0.27
+pydantic==2.13.4
+pydantic-settings==2.14.0
+python-dotenv==1.2.2
+
+# LLM & Embeddings
+openai==2.35.1
+langchain==1.2.18
+langchain-community==0.4.1
+langchain-openai==1.2.1
+langchain-qdrant==1.1.0
+
+# Document Processing
+llama-index==0.14.21
+llama-index-readers-file==0.6.0
+pypdf==6.10.2
+python-docx==1.2.0
+markdown==3.10.2
+unstructured==0.18.32
+
+# Database
+pymongo==4.17.0
+qdrant-client==1.17.1
+
+# Object Storage
+minio==7.2.20
+
+# HTTP
+httpx==0.28.1
+requests==2.33.1
+
+# Image
+pillow==12.2.0

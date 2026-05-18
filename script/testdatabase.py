@@ -60,7 +60,7 @@ def test_qdrant():
     import os
 
     host = os.getenv("QDRANT_HOST", "localhost")
-    port = int(os.getenv("QDRANT_PORT", 6333))
+    port = int(os.getenv("QDRANT_PORT", 8333))
     api_key = os.getenv("QDRANT_API_KEY")
 
     try:

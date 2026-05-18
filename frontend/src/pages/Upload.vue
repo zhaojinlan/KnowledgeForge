@@ -1,56 +1,76 @@
 <!-- src/pages/Upload.vue -->
 <template>
   <div class="upload-page">
-    <header>文件上传助手</header>
+    <header class="page-header">
+      <h1>知识库</h1>
+      <p>上传文档以构建知识库，支持 RAG 混合检索</p>
+    </header>
 
-    <!-- 文件展示区域 -->
-    <div ref="logContainer" class="files-container">
-      <!-- 已上传的文件卡片 -->
-      <div
-        v-for="file in uploadedFiles"
-        :key="file.id"
-        class="file-card"
-        :title="file.filename"
-      >
-        <span class="filename">{{ truncateName(file.filename) }}</span>
-        <small>{{ file.size }}</small>
+    <!-- 拖拽上传区域 -->
+    <div
+      class="drop-zone"
+      :class="{ 'drag-over': isDragOver, uploading: isUploading }"
+      @dragover.prevent="onDragOver"
+      @dragleave="onDragLeave"
+      @drop.prevent="onDrop"
+      @click="triggerFileInput"
+    >
+      <input
+        ref="fileInput"
+        type="file"
+        @change="handleFileSelect"
+        :disabled="isUploading"
+        style="display: none"
+      />
+      <div v-if="isUploading" class="uploading-state">
+        <div class="spinner">
+          <div class="spinner-ring"></div>
+          <div class="spinner-ring"></div>
+        </div>
+        <span>正在处理文档...</span>
       </div>
-
-      <!-- 上传入口卡片（始终在最后） -->
-      <label v-if="!isUploading" class="file-card upload-card" for="fileInput">
-        <span class="plus">+</span>
-      </label>
-
-      <!-- 上传中状态 -->
-      <div v-if="isUploading" class="file-card uploading">
-        <span class="spinner">📤</span>
-        <small>上传中...</small>
+      <div v-else class="drop-prompt">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <span>点击或拖拽文件到此处上传</span>
       </div>
     </div>
 
-    <!-- 隐藏的文件输入 -->
-    <input
-      id="fileInput"
-      ref="fileInput"
-      type="file"
-      @change="handleFileSelect"
-      :disabled="isUploading"
-      style="display: none"
-    />
-
-    <!-- 底部日志（可选，用于调试） -->
-    <footer v-if="false">
-      <div v-for="log in uploadLogs" :key="log.id" class="log-item">
-        [{{ log.time }}] {{ log.message }}
+    <!-- 文件展示区域 -->
+    <div class="files-section" v-if="uploadedFiles.length > 0">
+      <h3>已上传的文件</h3>
+      <div class="files-container">
+        <div
+          v-for="file in uploadedFiles"
+          :key="file.id"
+          class="file-card"
+          :title="file.filename"
+        >
+          <div class="file-icon" :class="getFileIcon(file.filename).class">
+            {{ getFileIcon(file.filename).label }}
+          </div>
+          <span class="filename" :title="file.filename">{{ truncateName(file.filename) }}</span>
+          <small>{{ file.size }}</small>
+        </div>
       </div>
-    </footer>
+    </div>
+
+    <div v-else class="no-files">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      <p>还没有上传任何文档</p>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
 
-// 工具函数
 const formatSize = (bytes) => {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -59,35 +79,17 @@ const formatSize = (bytes) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-const formatTime = (date) => {
-  return date.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-};
-
-// 响应式数据
 const fileInput = ref(null);
 const isUploading = ref(false);
+const isDragOver = ref(false);
 const uploadedFiles = ref([]);
-const uploadLogs = ref([]);
 const socket = ref(null);
-
-// 添加日志
-const addLog = (msg, role) => {
-  uploadLogs.value.push({
-    id: Date.now() + Math.random(),
-    message: msg,
-    role,
-    time: formatTime(new Date()),
-  });
-};
 
 // 从服务端获取初始文件列表
 const fetchInitialFiles = async () => {
   try {
-    const response = await fetch('http://localhost:8000/api/v1/files');
+    const response = await fetch('/api/v1/files');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const files = await response.json();
 
     uploadedFiles.value = files.map(f => ({
@@ -96,20 +98,100 @@ const fetchInitialFiles = async () => {
       size: formatSize(f.size),
       path: f.path,
     }));
-
-    addLog(`已加载 ${files.length} 个文件`, 'ai');
   } catch (error) {
-    addLog(`❌ 获取文件列表失败: ${error.message}`, 'ai');
+    console.error('获取文件列表失败:', error);
   }
 };
 
-// 建立 WebSocket 连接
+// 拖拽事件
+const onDragOver = () => {
+  isDragOver.value = true;
+};
+
+const onDragLeave = () => {
+  isDragOver.value = false;
+};
+
+const onDrop = (e) => {
+  isDragOver.value = false;
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    uploadFile(file);
+  }
+};
+
+// 触发文件选择
+const triggerFileInput = () => {
+  if (!isUploading.value && fileInput.value) {
+    fileInput.value.click();
+  }
+};
+
+// 选择并上传文件
+const handleFileSelect = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  uploadFile(file);
+};
+
+// 执行上传
+const uploadFile = async (file) => {
+  if (isUploading.value) return;
+
+  isUploading.value = true;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const response = await fetch('/api/v1/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.detail || '上传失败');
+    }
+  } catch (error) {
+    console.error('上传失败:', error.message);
+  } finally {
+    isUploading.value = false;
+    if (fileInput.value) fileInput.value.value = '';
+  }
+};
+
+// 获取文件类型图标
+const getFileIcon = (filename) => {
+  const ext = filename.split('.').pop().toLowerCase();
+  const iconMap = {
+    pdf:  { label: 'PDF', class: 'icon-pdf' },
+    doc:  { label: 'DOC', class: 'icon-doc' },
+    docx: { label: 'DOC', class: 'icon-doc' },
+    md:   { label: 'MD',  class: 'icon-md' },
+    txt:  { label: 'TXT', class: 'icon-txt' },
+    csv:  { label: 'CSV', class: 'icon-csv' },
+    json: { label: '{}',  class: 'icon-json' },
+    xml:  { label: '<>',  class: 'icon-xml' },
+  };
+  return iconMap[ext] || { label: 'FILE', class: 'icon-file' };
+};
+
+// 文件名截断
+const truncateName = (name) => {
+  if (name.length <= 14) return name;
+  return name.slice(0, 10) + '...' + name.slice(-3);
+};
+
+// WebSocket 实时同步
 const connectWebSocket = () => {
-  socket.value = new WebSocket('ws://localhost:8000/api/v1/ws');
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/ws`;
+  socket.value = new WebSocket(wsUrl);
 
   socket.value.onopen = () => {
-    console.log('🟢 WebSocket 已连接');
-    addLog('WebSocket 连接成功，实时同步已开启', 'ai');
+    console.log('WebSocket 已连接');
   };
 
   socket.value.onmessage = (event) => {
@@ -123,61 +205,15 @@ const connectWebSocket = () => {
         size: formatSize(f.size),
         path: f.path,
       });
-      addLog(`✅ 新文件已上传: ${f.filename}`, 'ai');
     }
   };
 
   socket.value.onclose = () => {
-    console.log('🟡 WebSocket 已断开，正在重连...');
-    addLog('WebSocket 断开，尝试重连...', 'ai');
-    setTimeout(connectWebSocket, 3000); // 重连
-  };
-
-  socket.value.onerror = (error) => {
-    console.error('🔴 WebSocket 错误:', error);
-    addLog('WebSocket 发生错误', 'ai');
+    console.log('WebSocket 断开，正在重连...');
+    setTimeout(connectWebSocket, 3000);
   };
 };
 
-// 选择并上传文件
-const handleFileSelect = async (e) => {
-  const file = e.target.files[0];
-  if (!file || isUploading.value) return;
-
-  addLog(`📤 正在上传: ${file.name}`, 'user');
-  isUploading.value = true;
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const response = await fetch('http://localhost:8000/api/v1/upload', {
-      method: 'POST',
-      body: formData,
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.detail || '上传失败');
-    }
-
-    addLog(`✅ 上传成功: ${result.filename}`, 'ai');
-  } catch (error) {
-    addLog(`❌ 上传失败: ${error.message}`, 'ai');
-  } finally {
-    isUploading.value = false;
-    fileInput.value.value = '';
-  }
-};
-
-// 文件名截断
-const truncateName = (name) => {
-  if (name.length <= 8) return name;
-  return name.slice(0, 5) + '...' + name.slice(-3);
-};
-
-// 生命周期
 onMounted(() => {
   fetchInitialFiles();
   connectWebSocket();
@@ -190,143 +226,219 @@ onUnmounted(() => {
 });
 </script>
 
-
-<style scoped>/* 页面容器 - 响应式宽度优化 */
+<style scoped>
 .upload-page {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  width: 100%;
-  max-width: 100vw; /* 防止溢出 */
+  min-height: 100vh;
+  padding: 2rem;
+  max-width: 960px;
   margin: 0 auto;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-  border-radius: 12px;
-  overflow: hidden;
-  background: white;
 }
 
-/* 在桌面端限制最大宽度，在移动端占满屏幕 */
-@media (min-width: 100%) {
-  .upload-page {
-    max-width: 800px;
-    margin: 1rem auto;
-    border-radius: 16px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  }
+/* 页头 */
+.page-header {
+  margin-bottom: 2rem;
 }
 
-header {
-  background: #3498db;
-  color: white;
-  padding: 1rem;
+.page-header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.page-header p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* 拖拽上传区域 */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 3rem 2rem;
   text-align: center;
-  font-size: 1.5rem;
-  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--card-bg);
+  margin-bottom: 2rem;
 }
 
-/* 文件展示区域：网格布局 - 响应式列数 */
-.files-container {
-  flex: 1;
-  padding: 1rem;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-  gap: 1rem;
-  align-content: flex-start;
-  background-color: #f9f9fb;
-  overflow-y: auto;
+.drop-zone:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
 }
 
-/* 在小屏幕上稍微缩小卡片间距 */
-@media (max-width: 480px) {
-  .files-container {
-    padding: 0.75rem;
-    gap: 0.75rem;
-  }
-
-  .file-card {
-    aspect-ratio: 1 / 1;
-    min-width: 0; /* 防止 grid 溢出 */
-  }
+.drop-zone.drag-over {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  transform: scale(1.01);
 }
 
-/* 通用文件卡片样式 */
-.file-card {
-  aspect-ratio: 1 / 1;
-  width: 100%;
-  background: white;
-  border: 2px dashed #bdc3c7;
-  border-radius: 12px;
+.drop-zone.uploading {
+  cursor: wait;
+  pointer-events: none;
+}
+
+.drop-prompt {
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 0.9rem;
-  color: #2c3e50;
-  text-align: center;
-  overflow: hidden;
-  min-width: 0; /* 防止内容溢出 grid 单元格 */
+  gap: 0.75rem;
+  color: var(--text-secondary);
 }
 
-.file-card:hover {
-  border-color: #3498db;
-  background-color: #f0f8ff;
+.drop-prompt svg {
+  width: 40px;
+  height: 40px;
+  color: var(--primary);
 }
 
-/* 上传卡片：加号 */
-.upload-card .plus {
-  font-size: 2rem;
-  font-weight: bold;
-  color: #7f8c8d;
-}
-
-/* 已上传文件的样式 */
-.file-card .filename {
-  font-weight: 500;
-  margin-bottom: 0.2rem;
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 0.5rem;
-}
-
-.file-card small {
-  color: #7f8c8d;
+.drop-prompt span {
+  font-size: 1rem;
 }
 
 /* 上传中状态 */
-.uploading {
-  border-color: #3498db !important;
-  background-color: #e8f4fd;
-  cursor: wait;
+.uploading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  color: var(--primary);
 }
 
-.uploading .spinner {
-  font-size: 1.5rem;
-  animation: bounce 1s infinite;
+.spinner {
+  position: relative;
+  width: 48px;
+  height: 48px;
 }
 
-@keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
+.spinner-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border: 3px solid transparent;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 
-/* 底部日志（可选） */
-footer {
-  padding: 0.5rem 1rem;
-  background: #eee;
-  font-size: 0.8rem;
-  color: #555;
-  max-height: 100px;
-  overflow-y: auto;
+.spinner-ring:nth-child(2) {
+  width: 70%;
+  height: 70%;
+  top: 15%;
+  left: 15%;
+  border-top-color: var(--primary-light);
+  animation-direction: reverse;
+  animation-duration: 0.75s;
 }
 
-.log-item {
-  margin: 0.2rem 0;
-  white-space: pre-wrap;
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
+/* 文件展示区域 */
+.files-section {
+  flex: 1;
+}
+
+.files-section h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 1rem;
+}
+
+.files-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.file-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  min-width: 0;
+}
+
+.file-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary);
+}
+
+.file-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.file-icon.icon-pdf  { background: #fef2f2; color: #ef4444; }
+.file-icon.icon-doc   { background: #eff6ff; color: #3b82f6; }
+.file-icon.icon-md    { background: #f0fdf4; color: #22c55e; }
+.file-icon.icon-txt   { background: #f5f3ff; color: #8b5cf6; }
+.file-icon.icon-csv   { background: #fff7ed; color: #f97316; }
+.file-icon.icon-json  { background: #fefce8; color: #ca8a04; }
+.file-icon.icon-xml   { background: #fdf2f8; color: #ec4899; }
+.file-icon.icon-file  { background: #f3f4f6; color: #6b7280; }
+
+.filename {
+  font-size: 0.85rem;
+  color: var(--text);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+.file-card small {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+/* 空状态 */
+.no-files {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  padding: 3rem 0;
+}
+
+.no-files svg {
+  width: 48px;
+  height: 48px;
+  opacity: 0.4;
+}
+
+/* 响应式 */
+@media (max-width: 640px) {
+  .upload-page {
+    padding: 1rem;
+  }
+  .files-container {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 0.75rem;
+  }
+  .drop-zone {
+    padding: 2rem 1rem;
+  }
+}
 </style>

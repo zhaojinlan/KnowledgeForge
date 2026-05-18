@@ -6,3 +6,4 @@ if __name__ == "__main__":
     emb = embedding_service.get_embedding(text)
     print(f"Embedding length: {len(emb)}")
     print(f"First 5 dims: {emb[:5]}")
+

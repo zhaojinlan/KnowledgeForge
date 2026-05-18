@@ -26,11 +26,27 @@ class Settings(BaseSettings):
     embedding_api_key: str
     embedding_base_url: str
     embedding_dim: int = 1024
-    
+    chunk_overlap:int = 100
+    chunk_size:int = 800
     # 应用配置
     app_name: str = "Model Server"
     debug: bool = False
-    
+
+    # CORS 配置（逗号分隔的源列表，或 "*" 表示全部）
+    cors_origins: str = "*"
+
+    # MinIO 配置
+    minio_endpoint: str = "localhost:19000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin123"
+    minio_bucket_name: str = "rag-files"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        if self.cors_origins == "*":
+            return ["*"]
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
     model_config = ConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
         env_file_encoding="utf-8",
@@ -39,11 +55,11 @@ class Settings(BaseSettings):
 # 创建全局 settings 实例
 try:
     settings = Settings()
-    print("✅ 全局配置加载成功！")
+    print("Config loaded successfully!")
 except Exception as e:
-    print("❌ 配置加载失败！可能是以下原因：")
-    print("   1. .env 文件不存在或路径错误")
-    print("   2. .env 中缺少必要的字段（如 embedding_model、api_key 等）")
-    print("   3. 字段值为空或格式错误（如 qdrant_port 写成了字符串）")
-    print("\n🎯 详细错误信息：")
-    raise e  # 重新抛出异常，便于定位
+    print("Config loading failed! Possible reasons:")
+    print("   1. .env file not found or path is wrong")
+    print("   2. Missing required fields in .env")
+    print("   3. Invalid field values (e.g. qdrant_port is a string)")
+    print("\nDetailed error:")
+    raise e

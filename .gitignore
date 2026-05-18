@@ -1,4 +1,11 @@
 ﻿__pycache__
 mongo_data
-mongo_data
+mongo_config
 qdrant_data
+minio_data
+tmp_uploads/
+.env
+config.yaml
+RAG/
+rag_storage/
+lightrag.log

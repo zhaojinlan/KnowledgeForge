@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(timeout 15 python app.py)",
+      "Bash(pip install *)",
+      "Bash(C:/Users/Administrator/.conda/envs/ms/python.exe -m pip install fastapi uvicorn langchain_openai langchain_core langchain_community langchain_text_splitters qdrant-client motor pydantic-settings pymongo requests httpx)",
+      "Bash(C:/Users/Administrator/.conda/envs/ms/python.exe app.py)",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":8000\")",
+      "Bash(PYTHONIOENCODING=utf-8 C:/Users/Administrator/.conda/envs/ms/python.exe -u -c ' *)",
+      "Bash(PYTHONIOENCODING=utf-8 C:/Users/Administrator/.conda/envs/ms/python.exe -u app.py)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import minio; print\\('minio version:', minio.__version__\\)\")",
+      "Bash(tasklist /FI \"IMAGENAME eq python.exe\")"
+    ]
+  }
+}
