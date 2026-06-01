@@ -9,3 +9,4 @@ config.yaml
 RAG/
 rag_storage/
 lightrag.log
+.env
