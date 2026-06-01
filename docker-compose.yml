@@ -1,5 +1,11 @@
 name: knowledgeforZJl
 
+volumes:
+  qdrant_data:
+  mongo_data:
+  mongo_config:
+  minio_data:
+
 services:
   qdrant:
     image: qdrant/qdrant
@@ -8,7 +14,7 @@ services:
       - "8333:6333"
       - "8334:6334"
     volumes:
-      - ./qdrant_data:/qdrant/storage
+      - qdrant_data:/qdrant/storage
     environment:
       - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
     restart: unless-stopped
@@ -19,8 +25,8 @@ services:
     ports:
       - "37017:27017"
     volumes:
-      - ./mongo_data:/data/db
-      - ./mongo_config:/data/configdb
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
@@ -33,7 +39,7 @@ services:
       - "19000:9000"
       - "19001:9001"
     volumes:
-      - ./minio_data:/data
+      - minio_data:/data
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin123

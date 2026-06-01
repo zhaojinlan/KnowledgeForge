@@ -7,4 +7,4 @@ sessions_collection = db["sessions"]
 messages_collection = db["messages"]
 
 
-print("✅ 正在连接 MongoDB:", settings.mongodb_uri)
+print("Connecting to MongoDB:", settings.mongodb_uri)

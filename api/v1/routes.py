@@ -5,6 +5,9 @@ from services.llm_service import llm_service  # 使用全局实例
 from services.embedding_service import retrieval_tool, document_storage_service
 from services.minio_service import minio_service
 from .ws_manager import manager
+from services.agent_service import agent_service
+from services.agent_stream import AgentEvent
+import json
 import os
 import datetime
 from datetime import datetime as dt
@@ -22,7 +25,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1")
 
 # 打印模型字段用于调试
-print("🎯 ChatRequest 字段:", ChatRequest.model_json_schema()["properties"])
+print("ChatRequest fields:", list(ChatRequest.model_json_schema()["properties"].keys()))
 
 
 # -------------------------------
@@ -141,11 +144,8 @@ async def chat(request: ChatRequest):
             if session_doc:
                 current_title = session_doc.get("title", "")
                 generic_titles = ["未命名会话", "新会话", "AI 聊天助手", "会话"]
-                logger.info(f"🔍 标题检查 | session_id={session_id}, title='{current_title}'")
                 if any(current_title == t or current_title.startswith(t) for t in generic_titles):
-                    # 确认这是该会话的第一条消息
                     msg_count = await messages_collection.count_documents({"session_id": session_id})
-                    logger.info(f"🔍 消息计数 | session_id={session_id}, count={msg_count}")
                     if msg_count == 0:
                         new_title = request.message[:20].strip()
                         if len(request.message) > 20:
@@ -154,13 +154,9 @@ async def chat(request: ChatRequest):
                             {"_id": session_id},
                             {"$set": {"title": new_title}}
                         )
-                        logger.info(f"📝 自动更新会话标题 | session_id={session_id}, old='{current_title}', new='{new_title}'")
-                    else:
-                        logger.info(f"🔍 非首次消息，跳过标题更新")
-                else:
-                    logger.info(f"🔍 标题非通用，跳过更新")
+                        logger.info(f"自动更新会话标题 | session_id={session_id}, old='{current_title}', new='{new_title}'")
         except Exception as e:
-            logger.error(f"自动标题更新异常: {e}", exc_info=True)
+            logger.warning(f"自动标题更新跳过: {e}")
 
         # 调用 LLM 服务（带 RAG 上下文）
         rag_context = ""
@@ -353,5 +349,98 @@ async def delete_session(session_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 删除会话时发生异常 | session_id={session_id}, error={str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除会话失败: {str(e)}")
+        logger.error(f"Failed to delete session | session_id={session_id}, error={str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+
+
+# ================================================================
+# Agent Routes (migrated from deep-code-agent architecture)
+# ================================================================
+
+@router.post("/agent/chat", response_model=ChatResponse)
+async def agent_chat(request: ChatRequest):
+    """Non-streaming agent chat endpoint. Uses KnowledgeAgentService for tool-calling."""
+    try:
+        logger.info(f"Agent chat request | message='{request.message[:50]}...', session_id='{request.session_id}'")
+
+        if not request.session_id:
+            session_id = str(uuid.uuid4())
+            now = dt.utcnow()
+            title = request.message[:20].strip()
+            if len(request.message) > 20:
+                title += "..."
+            await sessions_collection.insert_one({
+                "_id": session_id,
+                "title": title,
+                "created_at": now,
+                "updated_at": now,
+            })
+            logger.info(f"Agent new session | session_id={session_id}")
+        else:
+            session_id = request.session_id
+
+        response_text = await agent_service.ainvoke(request.message, session_id)
+        logger.info(f"Agent response | session_id={session_id}, len={len(response_text)}")
+
+        asyncio.create_task(save_message_to_db(session_id, "user", request.message))
+        asyncio.create_task(save_message_to_db(session_id, "ai", response_text))
+
+        return ChatResponse(response=response_text, session_id=session_id)
+
+    except Exception as e:
+        logger.error(f"Agent chat error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
+
+@router.websocket("/agent/ws/{session_id}")
+async def agent_websocket(websocket: WebSocket, session_id: str):
+    """Streaming agent chat via WebSocket.
+
+    Client sends JSON: {"message": "user text"}
+    Server streams JSON AgentEvent objects back.
+    """
+    await websocket.accept()
+    logger.info(f"Agent WebSocket connected | session_id={session_id}")
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+                user_message = data.get("message", "").strip()
+            except json.JSONDecodeError:
+                await websocket.send_json(
+                    AgentEvent.error(message="Invalid JSON", session_id=session_id).to_dict()
+                )
+                continue
+
+            if not user_message:
+                continue
+
+            # Save user message
+            asyncio.create_task(save_message_to_db(session_id, "user", user_message))
+
+            # Save response parts for final DB persistence
+            full_response_parts: list[str] = []
+
+            async for event in agent_service.astream_events(user_message, session_id):
+                await websocket.send_json(event.to_dict())
+
+                if event.type == "token":
+                    full_response_parts.append(event.data.get("content", ""))
+
+            # Save complete AI response
+            full_text = "".join(full_response_parts)
+            if full_text:
+                asyncio.create_task(save_message_to_db(session_id, "ai", full_text))
+
+    except WebSocketDisconnect:
+        logger.info(f"Agent WebSocket disconnected | session_id={session_id}")
+    except Exception as e:
+        logger.error(f"Agent WebSocket error | session_id={session_id}: {e}", exc_info=True)
+        try:
+            await websocket.send_json(
+                AgentEvent.error(message=str(e), session_id=session_id).to_dict()
+            )
+        except Exception:
+            pass

@@ -42,6 +42,10 @@
     <div class="main-content">
       <header class="chat-header">
         <span>{{ currentTitle || 'AI 聊天助手' }}</span>
+        <button class="mode-toggle" @click="isAgentMode = !isAgentMode" :title="isAgentMode ? '切换到 RAG 模式' : '切换到 Agent 模式'">
+          <span :class="['mode-indicator', isAgentMode ? 'agent' : 'rag']"></span>
+          {{ isAgentMode ? 'Agent' : 'RAG' }}
+        </button>
       </header>
 
       <div ref="chatContainer" class="chat-messages">
@@ -58,6 +62,10 @@
           :key="msg.id"
           :content="msg.content"
           :role="msg.role"
+        />
+        <AgentThinking
+          v-if="agentEvents.length > 0"
+          :events="agentEvents"
         />
         <div v-if="isTyping" class="loading">
           <span class="typing-dots">
@@ -93,8 +101,9 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue';
+import { ref, nextTick, onMounted, watch } from 'vue';
 import ChatMessage from '../components/ChatMessage.vue';
+import AgentThinking from '../components/AgentThinking.vue';
 
 // 会话相关
 const sessions = ref([]);
@@ -107,6 +116,12 @@ const messageInput = ref('');
 const isTyping = ref(false);
 const chatContainer = ref(null);
 const textarea = ref(null);
+
+// Agent 模式
+const isAgentMode = ref(false);
+const agentEvents = ref([]);
+const agentSocket = ref(null);
+const agentResponseText = ref('');
 
 // 获取会话列表
 const loadSessions = async () => {
@@ -155,8 +170,97 @@ const loadSession = async (id) => {
   }
 };
 
-// 发送消息
+// Agent 模式 - WebSocket 流式发送
+const sendAgentMessage = () => {
+  const message = messageInput.value.trim();
+  if (!message || isTyping.value) return;
+
+  messages.value.push({
+    id: Date.now(),
+    content: message,
+    role: 'user'
+  });
+  messageInput.value = '';
+  autoResize();
+  nextTick(() => scrollToBottom());
+
+  isTyping.value = true;
+  agentEvents.value = [];
+  agentResponseText.value = '';
+
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const sessionId = session_id.value || 'new';
+  const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/agent/ws/${sessionId}`;
+
+  const socket = new WebSocket(wsUrl);
+  agentSocket.value = socket;
+
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ message }));
+  };
+
+  socket.onmessage = (event) => {
+    try {
+      const agentEvent = JSON.parse(event.data);
+      const type = agentEvent.type;
+
+      if (type === 'token') {
+        agentResponseText.value += agentEvent.data.content || '';
+      } else if (type === 'tool_call' || type === 'tool_result' || type === 'thinking' || type === 'error') {
+        agentEvents.value = [...agentEvents.value, agentEvent];
+        nextTick(() => scrollToBottom());
+      } else if (type === 'complete') {
+        // If no streaming tokens, use full_response
+        if (!agentResponseText.value && agentEvent.data.full_response) {
+          agentResponseText.value = agentEvent.data.full_response;
+        }
+        // Fallback: if still empty, generate a minimal response
+        const finalText = agentResponseText.value || `Task completed using ${agentEvent.data.tool_calls_count || 0} tool call(s).`;
+        messages.value.push({
+          id: Date.now(),
+          content: finalText,
+          role: 'ai'
+        });
+        if (!session_id.value && agentEvent.session_id) {
+          session_id.value = agentEvent.session_id;
+          loadSessions();
+        }
+        agentResponseText.value = '';
+        agentEvents.value = [];
+        isTyping.value = false;
+        socket.close();
+      }
+      nextTick(() => scrollToBottom());
+    } catch (e) {
+      console.error('Agent event parse error:', e);
+    }
+  };
+
+  socket.onerror = (err) => {
+    console.error('Agent WebSocket error:', err);
+    messages.value.push({
+      id: Date.now(),
+      content: 'Agent connection error. Please try again.',
+      role: 'ai'
+    });
+    isTyping.value = false;
+    agentEvents.value = [];
+  };
+
+  socket.onclose = () => {
+    agentSocket.value = null;
+    if (isTyping.value) {
+      isTyping.value = false;
+    }
+  };
+};
+
+// 发送消息 (RAG 模式或 Agent 模式)
 const sendMessage = async () => {
+  if (isAgentMode.value) {
+    sendAgentMessage();
+    return;
+  }
   const message = messageInput.value.trim();
   if (!message || isTyping.value) return;
 
@@ -270,6 +374,16 @@ const scrollToBottom = () => {
     container.scrollTop = container.scrollHeight;
   }, 50);
 };
+
+// 模式切换时清理 WebSocket
+watch(isAgentMode, (newVal) => {
+  if (!newVal && agentSocket.value) {
+    agentSocket.value.close();
+    agentSocket.value = null;
+    isTyping.value = false;
+    agentEvents.value = [];
+  }
+});
 
 // 初始化
 onMounted(async () => {
@@ -443,11 +557,48 @@ onMounted(async () => {
   background: var(--card-bg);
   color: var(--text);
   padding: 0.875rem 1.25rem;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-weight: 600;
   font-size: 0.95rem;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
+}
+
+/* Agent/RAG mode toggle */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  transition: all 0.2s ease;
+}
+.mode-toggle:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.mode-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.mode-indicator.rag {
+  background: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+}
+.mode-indicator.agent {
+  background: var(--primary);
+  box-shadow: 0 0 4px rgba(79, 110, 247, 0.5);
 }
 
 /* 消息区域 */

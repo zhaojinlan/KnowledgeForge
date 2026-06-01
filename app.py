@@ -33,5 +33,7 @@ print("  LLM Model:", settings.model)
 print("  MongoDB URI:", settings.mongodb_uri.replace(settings.mongo_root_password, "****"))
 print("  Qdrant: {}:{}".format(settings.qdrant_host, settings.qdrant_port))
 if __name__ == "__main__":
+    import logging
     import uvicorn
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
     uvicorn.run("app:app", host="0.0.0.0", port=9000, reload=True)

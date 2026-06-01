@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     app_name: str = "Model Server"
     debug: bool = False
 
+    # Agent 配置
+    agent_enabled: bool = True
+    agent_max_iterations: int = 10
+    agent_tool_approval: bool = False
+
     # CORS 配置（逗号分隔的源列表，或 "*" 表示全部）
     cors_origins: str = "*"
 
